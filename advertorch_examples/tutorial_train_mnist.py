@@ -34,6 +34,7 @@ class CNN_Model(nn.Module):
                               kernel_size=5, padding = 2)
         self.maxpool2=nn.MaxPool2d(kernel_size = 2, stride = 2)
         self.fc1 = nn.Linear(64* 7* 7, 1024)
+        self.fc1_bn=nn.BatchNorm1d(1024)
         self.fc2 = nn.Linear(1024, 10)
 
     def initialize_weights(self, m):
@@ -47,7 +48,21 @@ class CNN_Model(nn.Module):
         elif isinstance(m, nn.Linear):
             nn.init.normal_(m.weight.data)
             nn.init.constant_(m.bias.data, 0.1)
-    
+
+    # # first fully connected layer 
+    # W_fc1 = self._weight_variable([7 * 7 * 64, 1024]) 
+    # b_fc1 = self._bias_variable([1024]) 
+ 
+    # h_pool2_flat = tf.reshape(h_pool2, [-1, 7 * 7 * 64]) 
+    # h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1) 
+    # #batch norm 
+    # batch_mean2, batch_var2 = tf.nn.moments(h_fc1, [0]) 
+    # scale2 = tf.Variable(tf.ones([1024])) 
+    # beta2 = tf.Variable(tf.zeros([1024])) 
+    # batch_norm = tf.nn.batch_normalization(h_fc1,batch_mean2,batch_var2,beta2,scale2,0.3) 
+    # batch_norm_sig  = tf.nn.sigmoid(batch_norm) 
+
+
     # Prediction
     def forward(self, x):
         # print("original Image Shape: ", x.shape)
@@ -67,6 +82,10 @@ class CNN_Model(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc1(x)
         # print("FC 1 Shape: ", x.shape)
+
+        x = torch.relu(x)
+        x = self.fc1_bn(x)
+
         x = self.fc2(x)
         # print("FC 2 Shape: ", x.shape)
         return x
@@ -92,10 +111,10 @@ def my_CrossEntropyLoss(outputs, targets, lamda=1):
 
 
 if __name__ == '__main__':
-    large_num_of_attacks = 100
     parser = argparse.ArgumentParser(description='Train MNIST')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--mode', default="cln", help="cln | adv")
+    parser.add_argument('--mode', default="cln", help="cln | adv ")
+    parser.add_argument('--expo_mode', default="adv", help="yang")
     parser.add_argument('--train_batch_size', default=50, type=int)
     parser.add_argument('--test_batch_size', default=1000, type=int)
     parser.add_argument('--log_interval', default=200, type=int)
@@ -110,7 +129,7 @@ if __name__ == '__main__':
         model_filename = "mnist_CNN_Model_clntrained.pt"
     elif args.mode == "adv":
         flag_advtrain = True
-        nb_epoch = 90
+        nb_epoch = 84
         model_filename = "mnist_CNN_Model_advtrained.pt"
     else:
         raise
@@ -128,17 +147,20 @@ if __name__ == '__main__':
     model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
+    large_num_of_attacks = 1
     if flag_advtrain:
         from advertorch.attacks import LinfPGDAttack, YangAttack
         adversary = LinfPGDAttack(
             model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
             nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
             clip_max=1.0, targeted=False)
-
-        adversary_yang = YangAttack(
-            model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
-            nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
-            clip_max=1.0, targeted=False, large_num_of_attacks=large_num_of_attacks)
+        if args.expo_mode in "yang":
+            large_num_of_attacks = 100
+            print("Yang Attack:  large_num_of_attacks =  ", large_num_of_attacks)
+            adversary_yang = YangAttack(
+                model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
+                nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
+                clip_max=1.0, targeted=False, large_num_of_attacks=large_num_of_attacks)
 
     itr = 0
     for epoch in range(nb_epoch):
@@ -150,16 +172,19 @@ if __name__ == '__main__':
                 # when performing attack, the model needs to be in eval mode
                 # also the parameters should NOT be accumulating gradients
                 with ctx_noparamgrad_and_eval(model):
-                    data, target = adversary_yang.perturb(data, target)
-                    data, target = data.to(device), target.to(device)
-                    # print(data.size(), target.size())
-                    # exit(0)
-
+                    if args.expo_mode == "yang":
+                        data, target = adversary_yang.perturb(data, target)
+                        data, target = data.to(device), target.to(device)
+                    else:
+                        data = adversary.perturb(data, target)
+                    
             optimizer.zero_grad()
             output = model(data)
             
-            # loss1 = F.cross_entropy(output, target, reduction='elementwise_mean')
-            loss = my_CrossEntropyLoss(output, target, lamda=1)
+            if args.expo_mode == "yang":
+                loss = my_CrossEntropyLoss(output, target, lamda=1)
+            else:
+                loss = F.cross_entropy(output, target, reduction='elementwise_mean')
             
             loss.backward()
             optimizer.step()
