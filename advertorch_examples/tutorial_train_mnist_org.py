@@ -20,75 +20,6 @@ from advertorch.test_utils import LeNet5
 from advertorch_examples.utils import get_mnist_train_loader
 from advertorch_examples.utils import get_mnist_test_loader
 from advertorch_examples.utils import TRAINED_MODEL_PATH
-import numpy as np
-
-
-class CNN_Model(nn.Module):
-    # Constructor
-    def __init__(self):
-        super(CNN_Model, self).__init__()
-        self.cnn1 = nn.Conv2d(in_channels=1, out_channels=32, 
-                              kernel_size=5, padding = 2)
-        self.maxpool1=nn.MaxPool2d(kernel_size = 2, padding = 1, stride = 2)
-        self.cnn2 = nn.Conv2d(in_channels=32, out_channels=64,
-                              kernel_size=5, padding = 2)
-        self.maxpool2=nn.MaxPool2d(kernel_size = 2, stride = 2)
-        self.fc1 = nn.Linear(64* 7* 7, 1024)
-        self.fc2 = nn.Linear(1024, 10)
-
-    def initialize_weights(self, m):
-        if isinstance(m, nn.Conv2d):
-            nn.init.normal_(m.weight.data,mean=0, std=0.1)
-            if m.bias is not None:
-                nn.init.constant_(m.bias.data, 0.1)
-        elif isinstance(m, nn.BatchNorm2d):
-            nn.init.normal_(m.weight.data, 0.1)
-            nn.init.constant_(m.bias.data, 0.1)
-        elif isinstance(m, nn.Linear):
-            nn.init.normal_(m.weight.data)
-            nn.init.constant_(m.bias.data, 0.1)
-    
-    # Prediction
-    def forward(self, x):
-        # print("original Image Shape: ", x.shape)
-        x = self.cnn1(x)
-        # print("CNN 1 Shape: ", x.shape)
-        x = torch.relu(x)
-        # print("Relu 1 Shape: ", x.shape)
-        x = self.maxpool1(x)
-        # print("MaxPool 1 Shape: ", x.shape)
-        x = self.cnn2(x)
-        # print("CNN 2 Shape: ", x.shape)
-        x = torch.relu(x)
-        # print("Relu 2 Shape: ", x.shape)
-        x = self.maxpool2(x)
-        # print("MaxPool 2 Shape: ", x.shape)
-        # Flatten the matrices
-        x = x.view(x.size(0), -1)
-        x = self.fc1(x)
-        # print("FC 1 Shape: ", x.shape)
-        x = self.fc2(x)
-        # print("FC 2 Shape: ", x.shape)
-        return x
-
-def softmax(x):
-    exp_x = torch.exp(x)
-    sum_x = torch.sum(exp_x, dim=1, keepdim=True)
-
-    return exp_x/sum_x
-
-def log_softmax(x):
-    return x - torch.logsumexp(x,dim=1, keepdim=True)
-
-def my_CrossEntropyLoss(outputs, targets, lamda=1):
-    num_examples = targets.shape[0]
-    batch_size = outputs.shape[0]
-    outputs = log_softmax(outputs)
-    outputs = outputs[range(batch_size), targets]
-    outputs = - torch.sum(outputs)/num_examples
-    outputs = torch.exp(lamda * outputs)
-    return outputs
-
 
 
 if __name__ == '__main__':
@@ -106,11 +37,11 @@ if __name__ == '__main__':
     if args.mode == "cln":
         flag_advtrain = False
         nb_epoch = 10
-        model_filename = "mnist_CNN_Model_clntrained.pt"
+        model_filename = "mnist_lenet5_clntrained.pt"
     elif args.mode == "adv":
         flag_advtrain = True
         nb_epoch = 90
-        model_filename = "mnist_CNN_Model_advtrained.pt"
+        model_filename = "mnist_lenet5_advtrained.pt"
     else:
         raise
 
@@ -119,26 +50,16 @@ if __name__ == '__main__':
     test_loader = get_mnist_test_loader(
         batch_size=args.test_batch_size, shuffle=False)
 
-    # model = LeNet5()
-
-    model = CNN_Model()
-    model.initialize_weights(model)
-    
+    model = LeNet5()
     model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
     if flag_advtrain:
-        from advertorch.attacks import LinfPGDAttack, YangAttack
-        # adversary = LinfPGDAttack(
-        #     model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
-        #     nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
-        #     clip_max=1.0, targeted=False)
-
-        adversary = YangAttack(
+        from advertorch.attacks import LinfPGDAttack
+        adversary = LinfPGDAttack(
             model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
             nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
             clip_max=1.0, targeted=False)
-
 
     for epoch in range(nb_epoch):
         model.train()
@@ -149,17 +70,12 @@ if __name__ == '__main__':
                 # when performing attack, the model needs to be in eval mode
                 # also the parameters should NOT be accumulating gradients
                 with ctx_noparamgrad_and_eval(model):
-                    data, target = adversary.perturb(data, target)
-                    data, target = data.to(device), target.to(device)
-                    # print(data.size(), target.size())
-                    # exit(0)
+                    data = adversary.perturb(data, target)
 
             optimizer.zero_grad()
             output = model(data)
-            
-            # loss1 = F.cross_entropy(output, target, reduction='elementwise_mean')
-            loss = my_CrossEntropyLoss(output, target, lamda=1)
-            
+            loss = F.cross_entropy(
+                output, target, reduction='elementwise_mean')
             loss.backward()
             optimizer.step()
             if batch_idx % args.log_interval == 0:

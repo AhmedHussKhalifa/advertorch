@@ -24,6 +24,7 @@ from advertorch.utils import batch_clamp
 from advertorch.utils import replicate_input
 from advertorch.utils import batch_l1_proj
 
+import random
 from .base import Attack
 from .base import LabelMixin
 from .utils import rand_init_delta
@@ -190,6 +191,92 @@ class PGDAttack(Attack, LabelMixin):
 
         return rval.data
 
+
+
+class YangAttack(Attack, LabelMixin):
+    """
+    The projected gradient descent attack (Madry et al, 2017).
+    The attack performs nb_iter steps of size eps_iter, while always staying
+    within eps from the initial point.
+    Paper: https://arxiv.org/pdf/1706.06083.pdf
+
+    :param predict: forward pass function.
+    :param loss_fn: loss function.
+    :param eps: maximum distortion.
+    :param nb_iter: number of iterations.
+    :param eps_iter: attack step size.
+    :param rand_init: (optional bool) random initialization.
+    :param clip_min: mininum value per input dimension.
+    :param clip_max: maximum value per input dimension.
+    :param ord: (optional) the order of maximum distortion (inf or 2).
+    :param targeted: if the attack is targeted.
+    """
+
+    def __init__(
+            self, predict, loss_fn=None, eps=0.3, nb_iter=40,
+            eps_iter=0.01, rand_init=True, clip_min=0., clip_max=1.,
+            ord=np.inf, l1_sparsity=None, targeted=False):
+        """
+        Create an instance of the PGDAttack.
+
+        """
+        super(YangAttack, self).__init__(
+            predict, loss_fn, clip_min, clip_max)
+        self.eps = eps
+        self.nb_iter = nb_iter
+        self.eps_iter = eps_iter
+        self.rand_init = rand_init
+        self.ord = ord
+        self.targeted = targeted
+        if self.loss_fn is None:
+            self.loss_fn = nn.CrossEntropyLoss(reduction="sum")
+        self.l1_sparsity = l1_sparsity
+        assert is_float_or_torch_tensor(self.eps_iter)
+        assert is_float_or_torch_tensor(self.eps)
+
+    def perturb(self,x_train, y_train, large_num_of_attacks=100):
+        """
+        Given examples (x, y), returns their adversarial counterparts with
+        an attack length of eps.
+
+        :param x: input tensor.
+        :param y: label tensor.
+                  - if None and self.targeted=False, compute y as predicted
+                    labels.
+                  - if self.targeted=True, then y must be the targeted labels.
+        :return: tensor containing perturbed inputs.
+        """
+        # x_res = np.array([])
+        # y_res = np.array([])
+        
+        x_train, y_train = self._verify_and_process_inputs(x_train, y_train)
+        x_train = x_train.reshape((50, 784))
+        x_train = x_train.cpu().detach().numpy()
+        y_train = y_train.cpu().detach().numpy()
+        x_res =  np.empty((50, 784), int)
+        y_res =np.empty((50, ), int)
+        for rep in range(large_num_of_attacks):
+            shape = x_train.shape
+            a=list(np.random.uniform(-self.eps,0,1000))
+            b= [0] * 1000
+            c = [-self.eps] * 700
+            d = [self.eps] * 100
+            a.extend(b)
+            a.extend(c)
+            a.extend(d)
+            flattened_array = np.array(random.choices(a,k=shape[0]*shape[1]))
+            shaped_array = flattened_array.reshape(shape[0], shape[1])
+            x = x_train+shaped_array
+            x = np.clip(x, 0, 1)
+            x_res = np.concatenate((x_res, x), axis = 0)
+            y_res = np.concatenate((y_res, y_train), axis = 0)
+            
+        x_train = x_res[50:]
+        y_train = y_res[50:]
+        x_train = x_train.reshape((5000, 1, 28,28))
+        x_train = torch.from_numpy(x_train).type(torch.FloatTensor)
+        y_train = torch.from_numpy(y_train)
+        return x_train, y_train
 
 class LinfPGDAttack(PGDAttack):
     """
