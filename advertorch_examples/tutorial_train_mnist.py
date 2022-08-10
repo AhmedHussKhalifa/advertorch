@@ -92,6 +92,7 @@ def my_CrossEntropyLoss(outputs, targets, lamda=1):
 
 
 if __name__ == '__main__':
+    large_num_of_attacks = 100
     parser = argparse.ArgumentParser(description='Train MNIST')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--mode', default="cln", help="cln | adv")
@@ -129,17 +130,17 @@ if __name__ == '__main__':
 
     if flag_advtrain:
         from advertorch.attacks import LinfPGDAttack, YangAttack
-        # adversary = LinfPGDAttack(
-        #     model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
-        #     nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
-        #     clip_max=1.0, targeted=False)
-
-        adversary = YangAttack(
+        adversary = LinfPGDAttack(
             model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
             nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
             clip_max=1.0, targeted=False)
 
+        adversary_yang = YangAttack(
+            model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
+            nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
+            clip_max=1.0, targeted=False, large_num_of_attacks=large_num_of_attacks)
 
+    itr = 0
     for epoch in range(nb_epoch):
         model.train()
         for batch_idx, (data, target) in enumerate(train_loader):
@@ -149,7 +150,7 @@ if __name__ == '__main__':
                 # when performing attack, the model needs to be in eval mode
                 # also the parameters should NOT be accumulating gradients
                 with ctx_noparamgrad_and_eval(model):
-                    data, target = adversary.perturb(data, target)
+                    data, target = adversary_yang.perturb(data, target)
                     data, target = data.to(device), target.to(device)
                     # print(data.size(), target.size())
                     # exit(0)
@@ -162,11 +163,17 @@ if __name__ == '__main__':
             
             loss.backward()
             optimizer.step()
-            if batch_idx % args.log_interval == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch, batch_idx *
-                    len(data), len(train_loader.dataset),
+            # if batch_idx % args.log_interval == 0:
+            #     print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            #         epoch, batch_idx *
+            #         len(data), len(train_loader.dataset),
+            #         100. * batch_idx / len(train_loader), loss.item()))
+            if itr % 300 == 0:
+                print('Train Epoch: {} || Iteration: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                    epoch, itr, batch_idx *
+                    len(data)/large_num_of_attacks , len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.item()))
+            itr += 1
 
         model.eval()
         test_clnloss = 0

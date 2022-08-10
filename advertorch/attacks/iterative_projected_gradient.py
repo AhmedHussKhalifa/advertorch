@@ -215,7 +215,7 @@ class YangAttack(Attack, LabelMixin):
     def __init__(
             self, predict, loss_fn=None, eps=0.3, nb_iter=40,
             eps_iter=0.01, rand_init=True, clip_min=0., clip_max=1.,
-            ord=np.inf, l1_sparsity=None, targeted=False):
+            ord=np.inf, l1_sparsity=None, targeted=False, large_num_of_attacks=100):
         """
         Create an instance of the PGDAttack.
 
@@ -228,13 +228,14 @@ class YangAttack(Attack, LabelMixin):
         self.rand_init = rand_init
         self.ord = ord
         self.targeted = targeted
+        self.large_num_of_attacks=large_num_of_attacks
         if self.loss_fn is None:
             self.loss_fn = nn.CrossEntropyLoss(reduction="sum")
         self.l1_sparsity = l1_sparsity
         assert is_float_or_torch_tensor(self.eps_iter)
         assert is_float_or_torch_tensor(self.eps)
 
-    def perturb(self,x_train, y_train, large_num_of_attacks=100):
+    def perturb(self,x_train, y_train):
         """
         Given examples (x, y), returns their adversarial counterparts with
         an attack length of eps.
@@ -255,7 +256,7 @@ class YangAttack(Attack, LabelMixin):
         y_train = y_train.cpu().detach().numpy()
         x_res =  np.empty((50, 784), int)
         y_res =np.empty((50, ), int)
-        for rep in range(large_num_of_attacks):
+        for rep in range(self.large_num_of_attacks):
             shape = x_train.shape
             a=list(np.random.uniform(-self.eps,0,1000))
             b= [0] * 1000
@@ -273,7 +274,7 @@ class YangAttack(Attack, LabelMixin):
             
         x_train = x_res[50:]
         y_train = y_res[50:]
-        x_train = x_train.reshape((5000, 1, 28,28))
+        x_train = x_train.reshape((50*self.large_num_of_attacks, 1, 28,28))
         x_train = torch.from_numpy(x_train).type(torch.FloatTensor)
         y_train = torch.from_numpy(y_train)
         return x_train, y_train
