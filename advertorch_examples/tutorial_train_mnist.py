@@ -23,6 +23,8 @@ from advertorch_examples.utils import TRAINED_MODEL_PATH
 import numpy as np
 
 
+
+
 class CNN_Model(nn.Module):
     # Constructor
     def __init__(self):
@@ -36,6 +38,7 @@ class CNN_Model(nn.Module):
         self.fc1 = nn.Linear(64* 7* 7, 1024)
         self.fc1_bn=nn.BatchNorm1d(1024)
         self.fc2 = nn.Linear(1024, 10)
+
 
     def initialize_weights(self, m):
         if isinstance(m, nn.Conv2d):
@@ -86,6 +89,8 @@ class CNN_Model(nn.Module):
         x = torch.relu(x)
         x = self.fc1_bn(x)
 
+        x = torch.sigmoid(x)
+
         x = self.fc2(x)
         # print("FC 2 Shape: ", x.shape)
         return x
@@ -99,16 +104,40 @@ def softmax(x):
 def log_softmax(x):
     return x - torch.logsumexp(x,dim=1, keepdim=True)
 
-def my_CrossEntropyLoss(outputs, targets, lamda=1):
-    num_examples = targets.shape[0]
-    batch_size = outputs.shape[0]
-    outputs = log_softmax(outputs)
-    outputs = outputs[range(batch_size), targets]
-    outputs = - torch.sum(outputs)/num_examples
-    outputs = torch.exp(lamda * outputs)
+def my_CrossEntropyLoss(outputs, targets, lamda=1, reduction='none'):
+    # num_examples = targets.shape[0]
+    # batch_size = outputs.shape[0]
+    # outputs = log_softmax(outputs)
+    # outputs = outputs[range(batch_size), targets]
+    # outputs = - torch.sum(outputs)/num_examples
+
+    logSoftmax = nn.LogSoftmax(dim=1)
+    outputs = logSoftmax(outputs)
+    criterion = nn.NLLLoss(reduction='none')
+    outputs = criterion(outputs, targets)
+    # outputs = torch.exp(lamda * outputs)
+    outputs = torch.mean(outputs)
     return outputs
 
+def my_CELoss_Expo(outputs, targets, lamda=1, reduction='none'):
+    # num_examples = targets.shape[0]
+    # batch_size = outputs.shape[0]
+    # outputs = log_softmax(outputs)
+    # outputs = outputs[range(batch_size), targets]
+    # outputs = torch.exp(-1 * lamda * outputs)
+    # outputs = torch.sum(outputs)/num_examples
 
+    logSoftmax = nn.LogSoftmax(dim=1)
+    outputs = logSoftmax(outputs)
+    criterion = nn.NLLLoss(reduction='none')
+    outputs = criterion(outputs, targets)
+    if reduction == 'none':
+        outputs = torch.exp(lamda * outputs)
+        outputs = torch.mean(outputs)
+    else:
+        outputs = torch.exp(lamda * outputs)
+        outputs = torch.sum(outputs)
+    return outputs
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train MNIST')
@@ -127,10 +156,16 @@ if __name__ == '__main__':
         flag_advtrain = False
         nb_epoch = 10
         model_filename = "mnist_CNN_Model_clntrained.pt"
+    elif args.mode == "adv" and args.expo_mode in "yang":
+        flag_advtrain = True
+        nb_epoch = 84
+        model_filename = "mnist_CNN_Model_advtrained_yang.pt"
+
     elif args.mode == "adv":
         flag_advtrain = True
         nb_epoch = 84
         model_filename = "mnist_CNN_Model_advtrained.pt"
+
     else:
         raise
 
@@ -142,7 +177,9 @@ if __name__ == '__main__':
     # model = LeNet5()
 
     model = CNN_Model()
-    model.initialize_weights(model)
+    # model.initialize_weights(model)
+    EPS = 0.1
+    EPS_yang = 0.3
     
     model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
@@ -151,14 +188,15 @@ if __name__ == '__main__':
     if flag_advtrain:
         from advertorch.attacks import LinfPGDAttack, YangAttack
         adversary = LinfPGDAttack(
-            model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
+            model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=EPS,
             nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
             clip_max=1.0, targeted=False)
-        if args.expo_mode in "yang":
-            large_num_of_attacks = 100
+
+        if args.expo_mode in "yang":  
+            large_num_of_attacks = 10
             print("Yang Attack:  large_num_of_attacks =  ", large_num_of_attacks)
             adversary_yang = YangAttack(
-                model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=0.3,
+                model, loss_fn=nn.CrossEntropyLoss(reduction="sum"), eps=EPS_yang,
                 nb_iter=40, eps_iter=0.01, rand_init=True, clip_min=0.0,
                 clip_max=1.0, targeted=False, large_num_of_attacks=large_num_of_attacks)
 
@@ -173,7 +211,7 @@ if __name__ == '__main__':
                 # also the parameters should NOT be accumulating gradients
                 with ctx_noparamgrad_and_eval(model):
                     if args.expo_mode == "yang":
-                        data, target = adversary_yang.perturb(data, target)
+                        data, target = adversary_yang.perturb_uniform(data, target)
                         data, target = data.to(device), target.to(device)
                     else:
                         data = adversary.perturb(data, target)
@@ -182,9 +220,12 @@ if __name__ == '__main__':
             output = model(data)
             
             if args.expo_mode == "yang":
-                loss = my_CrossEntropyLoss(output, target, lamda=1)
+                lamda = 1
+                loss = my_CELoss_Expo(output, target, lamda=lamda, reduction="none")
             else:
-                loss = F.cross_entropy(output, target, reduction='elementwise_mean')
+                # loss = nn.CrossEntropyLoss()(output, target)
+                # loss = F.cross_entropy(output, target, reduction='elementwise_mean')
+                loss = my_CrossEntropyLoss(output, target, reduction="none")
             
             loss.backward()
             optimizer.step()
@@ -210,10 +251,16 @@ if __name__ == '__main__':
 
         for clndata, target in test_loader:
             clndata, target = clndata.to(device), target.to(device)
+            
             with torch.no_grad():
                 output = model(clndata)
+            
+            # if args.expo_mode == "yang":
+            #     test_clnloss += my_CELoss_Expo(output, target, lamda=lamda)
+            # else:
             test_clnloss += F.cross_entropy(
                 output, target, reduction='sum').item()
+
             pred = output.max(1, keepdim=True)[1]
             clncorrect += pred.eq(target.view_as(pred)).sum().item()
 
@@ -221,8 +268,12 @@ if __name__ == '__main__':
                 advdata = adversary.perturb(clndata, target)
                 with torch.no_grad():
                     output = model(advdata)
-                test_advloss += F.cross_entropy(
-                    output, target, reduction='sum').item()
+                if args.expo_mode == "yang":
+                    test_advloss += my_CELoss_Expo(output, target, lamda=lamda)
+                    # outputs = F.cross_entropy(output, target, reduction='elementwise_mean')
+                else:
+                    test_advloss += my_CrossEntropyLoss(output, target)
+                    # test_advloss += F.cross_entropy(output, target, reduction='sum').item()
                 pred = output.max(1, keepdim=True)[1]
                 advcorrect += pred.eq(target.view_as(pred)).sum().item()
 

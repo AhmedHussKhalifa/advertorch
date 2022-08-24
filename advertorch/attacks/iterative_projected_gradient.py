@@ -71,7 +71,7 @@ def perturb_iterative(xvar, yvar, predict, nb_iter, eps, eps_iter, loss_fn,
         loss.backward()
         if ord == np.inf:
             grad_sign = delta.grad.data.sign()
-            delta.data = delta.data + batch_multiply(eps_iter, grad_sign)
+            delta.data = delta.data + batch_multiply(eps_iter, grad_sign) # x += self.a * np.sign(grad)
             delta.data = batch_clamp(eps, delta.data)
             delta.data = clamp(xvar.data + delta.data, clip_min, clip_max
                                ) - xvar.data
@@ -220,22 +220,22 @@ class YangAttack(Attack, LabelMixin):
         Create an instance of the PGDAttack.
 
         """
-        super(YangAttack, self).__init__(
-            predict, loss_fn, clip_min, clip_max)
+        # super(YangAttack, self).__init__(
+        #     predict, loss_fn, clip_min, clip_max)
         self.eps = eps
-        self.nb_iter = nb_iter
-        self.eps_iter = eps_iter
-        self.rand_init = rand_init
-        self.ord = ord
-        self.targeted = targeted
+        # self.nb_iter = nb_iter
+        # self.eps_iter = eps_iter
+        # self.rand_init = rand_init
+        # self.ord = ord
+        # self.targeted = targeted
         self.large_num_of_attacks=large_num_of_attacks
-        if self.loss_fn is None:
-            self.loss_fn = nn.CrossEntropyLoss(reduction="sum")
-        self.l1_sparsity = l1_sparsity
+        # if self.loss_fn is None:
+        #     self.loss_fn = nn.CrossEntropyLoss(reduction="sum")
+        # self.l1_sparsity = l1_sparsity
         assert is_float_or_torch_tensor(self.eps_iter)
         assert is_float_or_torch_tensor(self.eps)
 
-    def perturb(self,x_train, y_train):
+    def perturb_uniform(self,x_train, y_train):
         """
         Given examples (x, y), returns their adversarial counterparts with
         an attack length of eps.
@@ -254,8 +254,8 @@ class YangAttack(Attack, LabelMixin):
         x_train = x_train.reshape((50, 784))
         x_train = x_train.cpu().detach().numpy()
         y_train = y_train.cpu().detach().numpy()
-        x_res =  np.empty((50, 784), int)
-        y_res =np.empty((50, ), int)
+        x_res =  np.empty((50, 784), float)
+        y_res = np.empty((50, ), int)
         for rep in range(self.large_num_of_attacks):
             shape = x_train.shape
             a=list(np.random.uniform(-self.eps,0,1000))
@@ -277,6 +277,9 @@ class YangAttack(Attack, LabelMixin):
         x_train = x_train.reshape((50*self.large_num_of_attacks, 1, 28,28))
         x_train = torch.from_numpy(x_train).type(torch.FloatTensor)
         y_train = torch.from_numpy(y_train)
+
+        # print(torch.min(x_train), torch.max(x_train)) 
+        
         return x_train, y_train
 
 class LinfPGDAttack(PGDAttack):
