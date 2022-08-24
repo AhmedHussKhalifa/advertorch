@@ -1,0 +1,12 @@
+-e git+https://github.com/AhmedHussKhalifa/advertorch.git@12c6c7b830b8e1c047ff35781ad37c8d0ff13752#egg=advertorch
+certifi==2022.6.15
+charset-normalizer==2.1.0
+idna==3.3
+numpy==1.23.1
+Pillow==9.2.0
+requests==2.28.1
+torch==1.11.0+cu113
+torchaudio==0.11.0
+torchvision==0.12.0+cu113
+typing-extensions==4.3.0
+urllib3==1.26.11
