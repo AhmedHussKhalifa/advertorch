@@ -178,7 +178,7 @@ if __name__ == '__main__':
 
     model = CNN_Model()
     # model.initialize_weights(model)
-    EPS = 0.1
+    EPS = 0.3
     EPS_yang = 0.3
     
     model.to(device)

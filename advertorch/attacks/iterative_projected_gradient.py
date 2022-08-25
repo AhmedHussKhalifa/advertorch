@@ -224,7 +224,7 @@ class YangAttack(Attack, LabelMixin):
         #     predict, loss_fn, clip_min, clip_max)
         self.eps = eps
         # self.nb_iter = nb_iter
-        # self.eps_iter = eps_iter
+        self.eps_iter = eps_iter
         # self.rand_init = rand_init
         # self.ord = ord
         # self.targeted = targeted
@@ -250,7 +250,7 @@ class YangAttack(Attack, LabelMixin):
         # x_res = np.array([])
         # y_res = np.array([])
         
-        x_train, y_train = self._verify_and_process_inputs(x_train, y_train)
+        # x_train, y_train = self._verify_and_process_inputs(x_train, y_train)
         x_train = x_train.reshape((50, 784))
         x_train = x_train.cpu().detach().numpy()
         y_train = y_train.cpu().detach().numpy()
